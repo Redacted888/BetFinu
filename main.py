@@ -355,3 +355,54 @@ class DB:
               maker_side TEXT NOT NULL,
               outcome INTEGER NOT NULL,
               price_e4 INTEGER NOT NULL,
+              stake REAL NOT NULL,
+              status TEXT NOT NULL,
+              created_ts INTEGER NOT NULL,
+              FOREIGN KEY(market_id) REFERENCES markets(market_id) ON DELETE CASCADE,
+              FOREIGN KEY(maker) REFERENCES users(user) ON DELETE CASCADE,
+              FOREIGN KEY(taker) REFERENCES users(user) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_matches_market ON matches(market_id);
+            CREATE INDEX IF NOT EXISTS idx_matches_maker ON matches(maker);
+            CREATE INDEX IF NOT EXISTS idx_matches_taker ON matches(taker);
+            CREATE TABLE IF NOT EXISTS ledger(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts INTEGER NOT NULL,
+              user TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              ref TEXT,
+              delta_available REAL NOT NULL,
+              delta_locked REAL NOT NULL,
+              delta_pending REAL NOT NULL,
+              note TEXT NOT NULL,
+              FOREIGN KEY(user) REFERENCES users(user) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_ledger_user_ts ON ledger(user, ts);
+            """
+        )
+        c.execute("INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)", ("schema", DB_SCHEMA_TAG))
+        c.execute("INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)", ("created_ts", str(now_ts())))
+
+
+class RiskEngine:
+    def __init__(self, caps: RiskCaps):
+        self.caps = caps
+        self.user_notional: dict[str, float] = {}
+        self.market_notional: dict[int, float] = {}
+        self.last_touch: dict[str, int] = {}
+
+    def touch(self, user: str) -> None:
+        ts = now_ts()
+        prev = self.last_touch.get(user, 0)
+        if prev and ts - prev > self.caps.exposure_decay_window_s:
+            self.user_notional[user] = self.user_notional.get(user, 0.0) * 0.5
+        self.last_touch[user] = ts
+
+    def add_notional(self, market_id: int, maker: str, taker: str, notional: float) -> None:
+        self.touch(maker)
+        self.touch(taker)
+        mnext = self.market_notional.get(market_id, 0.0) + notional
+        if mnext > self.caps.max_market_notional:
+            raise ValueError("risk: market cap exceeded")
+        for u in (maker, taker):
+            unext = self.user_notional.get(u, 0.0) + notional
