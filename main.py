@@ -253,3 +253,54 @@ def parse_price_e4(price_e4: int) -> int:
 
 def parse_ts(ts: int) -> int:
     ts = int(ts)
+    if ts < 1:
+        raise ValueError("bad timestamp")
+    return ts
+
+
+def ensure_dir(p: str) -> None:
+    os.makedirs(p, exist_ok=True)
+
+
+def utc_iso(ts: int) -> str:
+    return _dt.datetime.utcfromtimestamp(ts).replace(tzinfo=_dt.timezone.utc).isoformat()
+
+
+class DB:
+    def __init__(self, path: str):
+        self.path = path
+        self._local = threading.local()
+
+    def conn(self) -> sqlite3.Connection:
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA journal_mode=WAL;")
+            c.execute("PRAGMA synchronous=NORMAL;")
+            c.execute("PRAGMA foreign_keys=ON;")
+            self._local.conn = c
+        return c
+
+    @contextlib.contextmanager
+    def tx(self):
+        c = self.conn()
+        c.execute("BEGIN;")
+        try:
+            yield c
+            c.execute("COMMIT;")
+        except Exception:
+            c.execute("ROLLBACK;")
+            raise
+
+    def init(self) -> None:
+        c = self.conn()
+        c.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS meta(
+              k TEXT PRIMARY KEY,
+              v TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS users(
+              user TEXT PRIMARY KEY,
+              created_ts INTEGER NOT NULL
