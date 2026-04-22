@@ -100,3 +100,54 @@ class MarketConfig:
     key: str
     label: str
     outcomes: int
+    close_ts: int
+    settle_deadline_ts: int
+    min_stake: float
+    max_stake: float
+    max_orders_per_user: int
+    allow_unmatched: bool
+    fee: FeeSchedule
+
+
+@dataclasses.dataclass(frozen=True)
+class Order:
+    order_id: str
+    market_id: int
+    maker: str
+    side: Side
+    outcome: int
+    price_e4: int
+    size: float
+    remaining: float
+    expiry_ts: int
+    status: OrderStatus
+    created_ts: int
+
+
+@dataclasses.dataclass(frozen=True)
+class Match:
+    match_id: str
+    market_id: int
+    maker: str
+    taker: str
+    maker_side: Side
+    outcome: int
+    price_e4: int
+    stake: float
+    status: MatchStatus
+    created_ts: int
+
+
+@dataclasses.dataclass(frozen=True)
+class Balance:
+    user: str
+    available: float
+    locked: float
+    pending_payout: float
+
+
+def now_ts() -> int:
+    return int(time.time())
+
+
+def clamp_int(name: str, v: int, lo: int, hi: int) -> int:
