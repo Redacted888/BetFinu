@@ -304,3 +304,54 @@ class DB:
             CREATE TABLE IF NOT EXISTS users(
               user TEXT PRIMARY KEY,
               created_ts INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS balances(
+              user TEXT PRIMARY KEY,
+              available REAL NOT NULL,
+              locked REAL NOT NULL,
+              pending_payout REAL NOT NULL,
+              updated_ts INTEGER NOT NULL,
+              FOREIGN KEY(user) REFERENCES users(user) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS markets(
+              market_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              key TEXT NOT NULL UNIQUE,
+              label TEXT NOT NULL,
+              outcomes INTEGER NOT NULL,
+              close_ts INTEGER NOT NULL,
+              settle_deadline_ts INTEGER NOT NULL,
+              min_stake REAL NOT NULL,
+              max_stake REAL NOT NULL,
+              max_orders_per_user INTEGER NOT NULL,
+              allow_unmatched INTEGER NOT NULL,
+              fee_bps INTEGER NOT NULL,
+              maker_rebate_bps INTEGER NOT NULL,
+              status TEXT NOT NULL,
+              settled_outcome INTEGER,
+              created_ts INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS orders(
+              order_id TEXT PRIMARY KEY,
+              market_id INTEGER NOT NULL,
+              maker TEXT NOT NULL,
+              side TEXT NOT NULL,
+              outcome INTEGER NOT NULL,
+              price_e4 INTEGER NOT NULL,
+              size REAL NOT NULL,
+              remaining REAL NOT NULL,
+              expiry_ts INTEGER NOT NULL,
+              status TEXT NOT NULL,
+              created_ts INTEGER NOT NULL,
+              FOREIGN KEY(market_id) REFERENCES markets(market_id) ON DELETE CASCADE,
+              FOREIGN KEY(maker) REFERENCES users(user) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_orders_market ON orders(market_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_maker ON orders(maker);
+            CREATE TABLE IF NOT EXISTS matches(
+              match_id TEXT PRIMARY KEY,
+              market_id INTEGER NOT NULL,
+              maker TEXT NOT NULL,
+              taker TEXT NOT NULL,
+              maker_side TEXT NOT NULL,
+              outcome INTEGER NOT NULL,
+              price_e4 INTEGER NOT NULL,
