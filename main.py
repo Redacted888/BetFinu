@@ -202,3 +202,54 @@ def stable_id(*parts: t.Any) -> str:
 def json_dumps(obj: t.Any) -> str:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
 
+
+def parse_user(user: str) -> str:
+    u = (user or "").strip()
+    if not u:
+        raise ValueError("user required")
+    if len(u) > 64:
+        raise ValueError("user too long")
+    return u
+
+
+def parse_market_key(k: str) -> str:
+    k = (k or "").strip()
+    if not k:
+        raise ValueError("market key required")
+    if len(k) > 96:
+        raise ValueError("market key too long")
+    return k
+
+
+def parse_label(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        raise ValueError("label required")
+    if len(s) > 160:
+        raise ValueError("label too long")
+    return s
+
+
+def parse_outcome(outcome: int, outcomes: int) -> int:
+    outcome = int(outcome)
+    if outcome < 1 or outcome > outcomes:
+        raise ValueError("bad outcome")
+    return outcome
+
+
+def parse_side(side: str) -> Side:
+    try:
+        return Side(side.upper())
+    except Exception as e:
+        raise ValueError("bad side") from e
+
+
+def parse_price_e4(price_e4: int) -> int:
+    price_e4 = int(price_e4)
+    if price_e4 < 1_000 or price_e4 > 99_900:
+        raise ValueError("bad price_e4")
+    return price_e4
+
+
+def parse_ts(ts: int) -> int:
+    ts = int(ts)
