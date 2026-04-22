@@ -406,3 +406,54 @@ class RiskEngine:
             raise ValueError("risk: market cap exceeded")
         for u in (maker, taker):
             unext = self.user_notional.get(u, 0.0) + notional
+            if unext > self.caps.max_user_notional:
+                raise ValueError(f"risk: user cap exceeded: {u}")
+            self.user_notional[u] = unext
+        self.market_notional[market_id] = mnext
+
+    @staticmethod
+    def notional(price_e4: int, stake: float) -> float:
+        return stake * odds_to_float(price_e4)
+
+
+class LedgerService:
+    def __init__(self, db: DB, risk: RiskEngine):
+        self.db = db
+        self.risk = risk
+
+    def _ensure_user(self, c: sqlite3.Connection, user: str) -> None:
+        user = parse_user(user)
+        c.execute("INSERT OR IGNORE INTO users(user, created_ts) VALUES(?,?)", (user, now_ts()))
+        c.execute(
+            "INSERT OR IGNORE INTO balances(user, available, locked, pending_payout, updated_ts) VALUES(?,?,?,?,?)",
+            (user, 0.0, 0.0, 0.0, now_ts()),
+        )
+
+    def get_balance(self, user: str) -> Balance:
+        user = parse_user(user)
+        c = self.db.conn()
+        self._ensure_user(c, user)
+        row = c.execute("SELECT user, available, locked, pending_payout FROM balances WHERE user=?", (user,)).fetchone()
+        assert row is not None
+        return Balance(user=row["user"], available=row["available"], locked=row["locked"], pending_payout=row["pending_payout"])
+
+    def _post_ledger(
+        self, c: sqlite3.Connection, user: str, kind: str, ref: str | None, da: float, dl: float, dp: float, note: str
+    ) -> None:
+        c.execute(
+            "INSERT INTO ledger(ts,user,kind,ref,delta_available,delta_locked,delta_pending,note) VALUES(?,?,?,?,?,?,?,?)",
+            (now_ts(), user, kind, ref, da, dl, dp, note),
+        )
+
+    def _apply_balance(self, c: sqlite3.Connection, user: str, da: float, dl: float, dp: float) -> Balance:
+        row = c.execute("SELECT available, locked, pending_payout FROM balances WHERE user=?", (user,)).fetchone()
+        if row is None:
+            raise ValueError("missing user")
+        a, l, p = float(row["available"]), float(row["locked"]), float(row["pending_payout"])
+        na, nl, np = a + da, l + dl, p + dp
+        if na < -1e-9 or nl < -1e-9 or np < -1e-9:
+            raise ValueError("insufficient balance")
+        c.execute(
+            "UPDATE balances SET available=?, locked=?, pending_payout=?, updated_ts=? WHERE user=?",
+            (na, nl, np, now_ts(), user),
+        )
