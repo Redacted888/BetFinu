@@ -151,3 +151,54 @@ def now_ts() -> int:
 
 
 def clamp_int(name: str, v: int, lo: int, hi: int) -> int:
+    if not isinstance(v, int):
+        raise ValueError(f"{name} must be int")
+    if v < lo or v > hi:
+        raise ValueError(f"{name} out of range {lo}..{hi}")
+    return v
+
+
+def clamp_float(name: str, v: float, lo: float, hi: float) -> float:
+    if not isinstance(v, (int, float)):
+        raise ValueError(f"{name} must be number")
+    v2 = float(v)
+    if v2 < lo or v2 > hi:
+        raise ValueError(f"{name} out of range {lo}..{hi}")
+    return v2
+
+
+def bps_fee(amount: float, bps: int) -> float:
+    return (amount * float(bps)) / 10_000.0
+
+
+def odds_to_float(price_e4: int) -> float:
+    return float(price_e4) / 10_000.0
+
+
+def float_to_e4(x: float) -> int:
+    if x <= 0:
+        raise ValueError("odds must be >0")
+    return int(round(x * 10_000.0))
+
+
+def ulidish() -> str:
+    # Not a ULID, but stable-length, sortable-ish, and low collision.
+    ts = now_ts()
+    rnd = secrets.token_bytes(10)
+    return f"BF{ts:010d}{base64.b32encode(rnd).decode('ascii').rstrip('=').lower()}"
+
+
+def stable_id(*parts: t.Any) -> str:
+    h = hashlib.blake2s(digest_size=16)
+    for p in parts:
+        if isinstance(p, bytes):
+            h.update(p)
+        else:
+            h.update(str(p).encode("utf-8"))
+            h.update(b"\x1f")
+    return h.hexdigest()
+
+
+def json_dumps(obj: t.Any) -> str:
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+
