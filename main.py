@@ -1120,3 +1120,54 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "balance": dataclasses.asdict(b)})
             return
 
+        if method == "POST" and path == "/market/create":
+            j = self._read_json()
+            close = int(j.get("close_ts"))
+            settle = int(j.get("settle_deadline_ts"))
+            cfg = MarketConfig(
+                key=str(j.get("key")),
+                label=str(j.get("label")),
+                outcomes=int(j.get("outcomes")),
+                close_ts=close,
+                settle_deadline_ts=settle,
+                min_stake=float(j.get("min_stake")),
+                max_stake=float(j.get("max_stake")),
+                max_orders_per_user=int(j.get("max_orders_per_user", 120)),
+                allow_unmatched=bool(j.get("allow_unmatched", True)),
+                fee=FeeSchedule(fee_bps=int(j.get("fee_bps", 230)), maker_rebate_bps=int(j.get("maker_rebate_bps", 90))),
+            )
+            mid = app.ledger.create_market(cfg)
+            self._send(200, {"ok": True, "market_id": mid, "market": app.ledger.get_market(mid)})
+            return
+
+        if method == "POST" and path == "/order/post":
+            j = self._read_json()
+            o = app.ledger.post_order(
+                market_id=int(j.get("market_id")),
+                maker=str(j.get("maker")),
+                side=parse_side(str(j.get("side"))),
+                outcome=int(j.get("outcome")),
+                price_e4=int(j.get("price_e4")),
+                size=float(j.get("size")),
+                expiry_ts=int(j.get("expiry_ts")),
+            )
+            self._send(200, {"ok": True, "order": dataclasses.asdict(o)})
+            return
+
+        if method == "POST" and path == "/order/cancel":
+            j = self._read_json()
+            o = app.ledger.cancel_order(order_id=str(j.get("order_id")), by=str(j.get("by")))
+            self._send(200, {"ok": True, "order": dataclasses.asdict(o)})
+            return
+
+        if method == "POST" and path == "/order/take":
+            j = self._read_json()
+            m = app.ledger.take_order(order_id=str(j.get("order_id")), taker=str(j.get("taker")), stake=float(j.get("stake")))
+            self._send(200, {"ok": True, "match": dataclasses.asdict(m)})
+            return
+
+        if method == "POST" and path == "/market/settle":
+            j = self._read_json()
+            market_id = int(j.get("market_id"))
+            outcome = int(j.get("outcome"))
+            m = app.ledger.settle_market(market_id, outcome)
