@@ -814,3 +814,54 @@ class LedgerService:
                     created,
                 ),
             )
+            return self.get_match(mid)
+
+    def get_match(self, match_id: str) -> Match:
+        c = self.db.conn()
+        r = c.execute("SELECT * FROM matches WHERE match_id=?", (match_id,)).fetchone()
+        if not r:
+            raise ValueError("match not found")
+        return Match(
+            match_id=r["match_id"],
+            market_id=int(r["market_id"]),
+            maker=r["maker"],
+            taker=r["taker"],
+            maker_side=Side(r["maker_side"]),
+            outcome=int(r["outcome"]),
+            price_e4=int(r["price_e4"]),
+            stake=float(r["stake"]),
+            status=MatchStatus(r["status"]),
+            created_ts=int(r["created_ts"]),
+        )
+
+    def list_matches(self, market_id: int | None = None, user: str | None = None) -> list[dict[str, t.Any]]:
+        c = self.db.conn()
+        q = "SELECT * FROM matches"
+        args: list[t.Any] = []
+        cond: list[str] = []
+        if market_id is not None:
+            cond.append("market_id=?")
+            args.append(int(market_id))
+        if user is not None:
+            u = parse_user(user)
+            cond.append("(maker=? OR taker=?)")
+            args.extend([u, u])
+        if cond:
+            q += " WHERE " + " AND ".join(cond)
+        q += " ORDER BY created_ts DESC LIMIT 500"
+        rows = c.execute(q, args).fetchall()
+        out: list[dict[str, t.Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "match_id": r["match_id"],
+                    "market_id": int(r["market_id"]),
+                    "maker": r["maker"],
+                    "taker": r["taker"],
+                    "maker_side": r["maker_side"],
+                    "outcome": int(r["outcome"]),
+                    "price_e4": int(r["price_e4"]),
+                    "stake": float(r["stake"]),
+                    "status": r["status"],
+                    "created_ts": int(r["created_ts"]),
+                }
