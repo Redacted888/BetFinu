@@ -559,3 +559,54 @@ class LedgerService:
                     "fee_bps": int(r["fee_bps"]),
                     "maker_rebate_bps": int(r["maker_rebate_bps"]),
                     "status": r["status"],
+                    "settled_outcome": int(r["settled_outcome"]) if r["settled_outcome"] is not None else None,
+                }
+            )
+        return out
+
+    def get_market(self, market_id: int) -> dict[str, t.Any]:
+        c = self.db.conn()
+        r = c.execute(
+            "SELECT market_id,key,label,outcomes,close_ts,settle_deadline_ts,min_stake,max_stake,max_orders_per_user,allow_unmatched,fee_bps,maker_rebate_bps,status,settled_outcome FROM markets WHERE market_id=?",
+            (int(market_id),),
+        ).fetchone()
+        if not r:
+            raise ValueError("market not found")
+        return {
+            "market_id": int(r["market_id"]),
+            "key": r["key"],
+            "label": r["label"],
+            "outcomes": int(r["outcomes"]),
+            "close_ts": int(r["close_ts"]),
+            "settle_deadline_ts": int(r["settle_deadline_ts"]),
+            "min_stake": float(r["min_stake"]),
+            "max_stake": float(r["max_stake"]),
+            "max_orders_per_user": int(r["max_orders_per_user"]),
+            "allow_unmatched": bool(int(r["allow_unmatched"])),
+            "fee_bps": int(r["fee_bps"]),
+            "maker_rebate_bps": int(r["maker_rebate_bps"]),
+            "status": r["status"],
+            "settled_outcome": int(r["settled_outcome"]) if r["settled_outcome"] is not None else None,
+        }
+
+    def _market_cfg_row(self, c: sqlite3.Connection, market_id: int) -> tuple[sqlite3.Row, MarketConfig]:
+        r = c.execute("SELECT * FROM markets WHERE market_id=?", (int(market_id),)).fetchone()
+        if not r:
+            raise ValueError("market not found")
+        cfg = MarketConfig(
+            key=r["key"],
+            label=r["label"],
+            outcomes=int(r["outcomes"]),
+            close_ts=int(r["close_ts"]),
+            settle_deadline_ts=int(r["settle_deadline_ts"]),
+            min_stake=float(r["min_stake"]),
+            max_stake=float(r["max_stake"]),
+            max_orders_per_user=int(r["max_orders_per_user"]),
+            allow_unmatched=bool(int(r["allow_unmatched"])),
+            fee=FeeSchedule(fee_bps=int(r["fee_bps"]), maker_rebate_bps=int(r["maker_rebate_bps"])),
+        )
+        return r, cfg
+
+    def post_order(
+        self,
+        market_id: int,
