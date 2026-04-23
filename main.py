@@ -661,3 +661,54 @@ class LedgerService:
                     float(size),
                     float(size),
                     int(expiry_ts),
+                    OrderStatus.LIVE.value,
+                    created,
+                ),
+            )
+            self._post_ledger(tx, maker, "LOCK", oid, da=-lock, dl=lock, dp=0.0, note="order lock")
+            return Order(
+                order_id=oid,
+                market_id=int(market_id),
+                maker=maker,
+                side=side,
+                outcome=int(outcome),
+                price_e4=int(price_e4),
+                size=float(size),
+                remaining=float(size),
+                expiry_ts=int(expiry_ts),
+                status=OrderStatus.LIVE,
+                created_ts=int(created),
+            )
+
+    def cancel_order(self, order_id: str, by: str) -> Order:
+        by = parse_user(by)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            r = tx.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
+            if not r:
+                raise ValueError("order not found")
+            if r["maker"] != by:
+                raise ValueError("not maker")
+            st = r["status"]
+            if st in (OrderStatus.CANCELED.value, OrderStatus.FILLED.value):
+                raise ValueError("already final")
+            remaining = float(r["remaining"])
+            side = Side(r["side"])
+            lock = self._lock_for(side, int(r["price_e4"]), remaining)
+            tx.execute("UPDATE orders SET status=?, remaining=? WHERE order_id=?", (OrderStatus.CANCELED.value, 0.0, order_id))
+            self._apply_balance(tx, by, da=lock, dl=-lock, dp=0.0)
+            self._post_ledger(tx, by, "UNLOCK", order_id, da=lock, dl=-lock, dp=0.0, note="order cancel unlock")
+            return self.get_order(order_id)
+
+    def get_order(self, order_id: str) -> Order:
+        c = self.db.conn()
+        r = c.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
+        if not r:
+            raise ValueError("order not found")
+        return Order(
+            order_id=r["order_id"],
+            market_id=int(r["market_id"]),
+            maker=r["maker"],
+            side=Side(r["side"]),
+            outcome=int(r["outcome"]),
+            price_e4=int(r["price_e4"]),
