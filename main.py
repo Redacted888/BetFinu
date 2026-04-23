@@ -1324,3 +1324,54 @@ def cmd_market_list(args) -> None:
 
 
 def cmd_order_post(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    expiry = now_ts() + int(args.expiry_in)
+    o = app.ledger.post_order(
+        market_id=int(args.market_id),
+        maker=args.maker,
+        side=parse_side(args.side),
+        outcome=int(args.outcome),
+        price_e4=int(args.price_e4),
+        size=float(args.size),
+        expiry_ts=expiry,
+    )
+    print(json_dumps({"ok": True, "order": dataclasses.asdict(o)}))
+
+
+def cmd_order_cancel(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    o = app.ledger.cancel_order(order_id=args.order_id, by=args.by)
+    print(json_dumps({"ok": True, "order": dataclasses.asdict(o)}))
+
+
+def cmd_order_take(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    m = app.ledger.take_order(order_id=args.order_id, taker=args.taker, stake=float(args.stake))
+    print(json_dumps({"ok": True, "match": dataclasses.asdict(m)}))
+
+
+def cmd_settle(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    m = app.ledger.settle_market(int(args.market_id), int(args.outcome))
+    print(json_dumps({"ok": True, "market": m}))
+
+
+def cmd_void(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    m = app.ledger.void_market(int(args.market_id))
+    print(json_dumps({"ok": True, "market": m}))
+
+
+def cmd_claim(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    out = app.ledger.claim(match_id=args.match_id, claimant=args.claimant)
+    print(json_dumps({"ok": True, "claim": out}))
+
+
+def cmd_balance(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    b = app.ledger.get_balance(args.user)
+    print(json_dumps({"ok": True, "balance": dataclasses.asdict(b)}))
+
+
+def cmd_orders(args) -> None:
