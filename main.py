@@ -967,3 +967,54 @@ class LedgerService:
         if odds <= 1.0:
             return float(stake)
         liability = stake * (odds - 1.0)
+        return float(stake + liability)
+
+    def stats(self) -> dict[str, t.Any]:
+        c = self.db.conn()
+        row = c.execute("SELECT COUNT(1) AS n FROM users").fetchone()
+        users = int(row["n"]) if row else 0
+        row = c.execute("SELECT COUNT(1) AS n FROM markets").fetchone()
+        markets = int(row["n"]) if row else 0
+        row = c.execute("SELECT COUNT(1) AS n FROM orders").fetchone()
+        orders = int(row["n"]) if row else 0
+        row = c.execute("SELECT COUNT(1) AS n FROM matches").fetchone()
+        matches = int(row["n"]) if row else 0
+        return {"users": users, "markets": markets, "orders": orders, "matches": matches, "version": APP_VERSION}
+
+    def tail_ledger(self, user: str, limit: int = 50) -> list[dict[str, t.Any]]:
+        user = parse_user(user)
+        limit = clamp_int("limit", int(limit), 1, 500)
+        c = self.db.conn()
+        rows = c.execute(
+            "SELECT ts,kind,ref,delta_available,delta_locked,delta_pending,note FROM ledger WHERE user=? ORDER BY id DESC LIMIT ?",
+            (user, limit),
+        ).fetchall()
+        out: list[dict[str, t.Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "ts": int(r["ts"]),
+                    "iso": utc_iso(int(r["ts"])),
+                    "kind": r["kind"],
+                    "ref": r["ref"],
+                    "da": float(r["delta_available"]),
+                    "dl": float(r["delta_locked"]),
+                    "dp": float(r["delta_pending"]),
+                    "note": r["note"],
+                }
+            )
+        return out
+
+
+class APIServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
+    def __init__(self, addr, handler_cls, app: "BetFinuApp"):
+        super().__init__(addr, handler_cls)
+        self.app = app
+
+
+class APIHandler(http.server.BaseHTTPRequestHandler):
+    server: APIServer
+
+    def _send(self, code: int, body: dict[str, t.Any]):
