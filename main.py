@@ -1222,3 +1222,54 @@ class BetFinuApp:
                 outcomes=3,
                 close_ts=ts + 260,
                 settle_deadline_ts=ts + 900,
+                min_stake=25.0,
+                max_stake=1_500.0,
+                max_orders_per_user=80,
+                allow_unmatched=True,
+                fee=FeeSchedule(fee_bps=235, maker_rebate_bps=105),
+            )
+        )
+        # Quotes
+        expiry = ts + 240
+        o1 = self.ledger.post_order(mid, "ALPHA_DESK", Side.BACK, 1, float_to_e4(1.86), 450.0, expiry)
+        o2 = self.ledger.post_order(mid, "ALPHA_DESK", Side.LAY, 2, float_to_e4(2.72), 320.0, expiry)
+        o3 = self.ledger.post_order(mid, "BETA_RUNNER", Side.BACK, 3, float_to_e4(3.35), 260.0, expiry)
+        # Takes
+        m1 = self.ledger.take_order(o1.order_id, "GAMMA_PUNTER", stake=175.0)
+        m2 = self.ledger.take_order(o2.order_id, "GAMMA_PUNTER", stake=120.0)
+        _m3 = self.ledger.take_order(o3.order_id, "ALPHA_DESK", stake=160.0)
+        return {"seed": self.seed, "market_id": mid, "orders": [o1.order_id, o2.order_id, o3.order_id], "matches": [m1.match_id, m2.match_id]}
+
+
+def _setup_logging(verbosity: int) -> None:
+    level = logging.WARNING
+    if verbosity == 1:
+        level = logging.INFO
+    if verbosity >= 2:
+        level = logging.DEBUG
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+def run_api(app: BetFinuApp, host: str, port: int) -> None:
+    server = APIServer((host, port), APIHandler, app=app)
+    LOG.info("API listening on http://%s:%d", host, port)
+    try:
+        server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        LOG.info("API interrupted")
+    finally:
+        server.server_close()
+
+
+def cmd_init(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    print(json_dumps({"ok": True, "db": args.db, "version": APP_VERSION, "seed": app.seed}))
+
+
+def cmd_demo(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    out = app.bootstrap_demo()
+    print(json_dumps({"ok": True, "demo": out, "markets": app.ledger.list_markets(), "stats": app.ledger.stats()}))
+
+
+def cmd_api(args) -> None:
