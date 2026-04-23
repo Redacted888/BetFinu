@@ -1273,3 +1273,54 @@ def cmd_demo(args) -> None:
 
 
 def cmd_api(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    if args.demo:
+        app.bootstrap_demo()
+    run_api(app, host=args.host, port=args.port)
+
+
+def cmd_deposit(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    b = app.ledger.deposit(args.user, args.amount, note="cli deposit")
+    print(json_dumps({"ok": True, "balance": dataclasses.asdict(b)}))
+
+
+def cmd_withdraw_queue(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    b = app.ledger.queue_withdraw(args.user, args.amount, note="cli queue withdraw")
+    print(json_dumps({"ok": True, "balance": dataclasses.asdict(b)}))
+
+
+def cmd_withdraw(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    b = app.ledger.withdraw(args.user, note="cli withdraw")
+    print(json_dumps({"ok": True, "balance": dataclasses.asdict(b)}))
+
+
+def cmd_market_create(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    ts = now_ts()
+    close = ts + int(args.close_in)
+    settle = close + int(args.settle_after)
+    cfg = MarketConfig(
+        key=args.key,
+        label=args.label,
+        outcomes=int(args.outcomes),
+        close_ts=close,
+        settle_deadline_ts=settle,
+        min_stake=float(args.min_stake),
+        max_stake=float(args.max_stake),
+        max_orders_per_user=int(args.max_orders),
+        allow_unmatched=bool(args.allow_unmatched),
+        fee=FeeSchedule(fee_bps=int(args.fee_bps), maker_rebate_bps=int(args.rebate_bps)),
+    )
+    mid = app.ledger.create_market(cfg)
+    print(json_dumps({"ok": True, "market_id": mid, "market": app.ledger.get_market(mid)}))
+
+
+def cmd_market_list(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    print(json_dumps({"ok": True, "markets": app.ledger.list_markets()}))
+
+
+def cmd_order_post(args) -> None:
