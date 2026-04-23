@@ -1069,3 +1069,54 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         if method == "GET" and path == "/markets":
             self._send(200, {"ok": True, "markets": app.ledger.list_markets()})
             return
+
+        if method == "GET" and path == "/orders":
+            mid = qs.get("market_id", [None])[0]
+            user = qs.get("user", [None])[0]
+            self._send(200, {"ok": True, "orders": app.ledger.list_orders(market_id=int(mid) if mid else None, user=user)})
+            return
+
+        if method == "GET" and path == "/matches":
+            mid = qs.get("market_id", [None])[0]
+            user = qs.get("user", [None])[0]
+            self._send(200, {"ok": True, "matches": app.ledger.list_matches(market_id=int(mid) if mid else None, user=user)})
+            return
+
+        if method == "GET" and path == "/balance":
+            user = qs.get("user", [None])[0]
+            if not user:
+                raise ValueError("user required")
+            self._send(200, {"ok": True, "balance": dataclasses.asdict(app.ledger.get_balance(user))})
+            return
+
+        if method == "GET" and path == "/ledger/tail":
+            user = qs.get("user", [None])[0]
+            if not user:
+                raise ValueError("user required")
+            lim = int(qs.get("limit", ["50"])[0])
+            self._send(200, {"ok": True, "rows": app.ledger.tail_ledger(user, lim)})
+            return
+
+        if method == "POST" and path == "/deposit":
+            j = self._read_json()
+            user = j.get("user")
+            amount = float(j.get("amount"))
+            b = app.ledger.deposit(user, amount, note="api deposit")
+            self._send(200, {"ok": True, "balance": dataclasses.asdict(b)})
+            return
+
+        if method == "POST" and path == "/withdraw/queue":
+            j = self._read_json()
+            user = j.get("user")
+            amount = float(j.get("amount"))
+            b = app.ledger.queue_withdraw(user, amount, note="api queue withdraw")
+            self._send(200, {"ok": True, "balance": dataclasses.asdict(b)})
+            return
+
+        if method == "POST" and path == "/withdraw":
+            j = self._read_json()
+            user = j.get("user")
+            b = app.ledger.withdraw(user, note="api withdraw")
+            self._send(200, {"ok": True, "balance": dataclasses.asdict(b)})
+            return
+
