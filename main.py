@@ -1477,3 +1477,44 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--claimant", required=True)
     s.set_defaults(fn=cmd_claim)
 
+    s = sub.add_parser("balance", help="Show balance")
+    s.add_argument("user")
+    s.set_defaults(fn=cmd_balance)
+
+    s = sub.add_parser("orders", help="List orders")
+    s.add_argument("--market-id", default=None)
+    s.add_argument("--user", default=None)
+    s.set_defaults(fn=cmd_orders)
+
+    s = sub.add_parser("matches", help="List matches")
+    s.add_argument("--market-id", default=None)
+    s.add_argument("--user", default=None)
+    s.set_defaults(fn=cmd_matches)
+
+    s = sub.add_parser("ledger-tail", help="Tail user ledger")
+    s.add_argument("user")
+    s.add_argument("--limit", default=50)
+    s.set_defaults(fn=cmd_ledger_tail)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv if argv is not None else sys.argv[1:]
+    p = build_parser()
+    args = p.parse_args(argv)
+    _setup_logging(args.verbose)
+    try:
+        args.fn(args)
+        return 0
+    except Exception as e:
+        LOG.error("error: %s", e)
+        if args.verbose:
+            traceback.print_exc()
+        else:
+            print(json_dumps({"ok": False, "error": str(e), "hint": "re-run with -v for stacktrace"}))
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
