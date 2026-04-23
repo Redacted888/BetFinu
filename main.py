@@ -1171,3 +1171,54 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             market_id = int(j.get("market_id"))
             outcome = int(j.get("outcome"))
             m = app.ledger.settle_market(market_id, outcome)
+            self._send(200, {"ok": True, "market": m})
+            return
+
+        if method == "POST" and path == "/market/void":
+            j = self._read_json()
+            market_id = int(j.get("market_id"))
+            m = app.ledger.void_market(market_id)
+            self._send(200, {"ok": True, "market": m})
+            return
+
+        if method == "POST" and path == "/claim":
+            j = self._read_json()
+            out = app.ledger.claim(match_id=str(j.get("match_id")), claimant=str(j.get("claimant")))
+            self._send(200, {"ok": True, "claim": out})
+            return
+
+        raise ValueError("not found")
+
+
+class BetFinuApp:
+    def __init__(self, db_path: str, seed: int | None = None):
+        self.db = DB(db_path)
+        self.db.init()
+        self.risk = RiskEngine(
+            RiskCaps(
+                max_market_notional=9_750_000.0,
+                max_user_notional=219_500.0,
+                max_fee_bps=470,
+                max_rebate_bps=210,
+                exposure_decay_window_s=93_000,
+            )
+        )
+        self.ledger = LedgerService(self.db, self.risk)
+        self.seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
+        self.rng = random.Random(self.seed)
+
+    def bootstrap_demo(self) -> dict[str, t.Any]:
+        # A demo that feels like a finance/betting terminal book:
+        # - 3 users with balances
+        # - 1 market with quotes, matches, then settle
+        ts = now_ts()
+        users = ["ALPHA_DESK", "BETA_RUNNER", "GAMMA_PUNTER"]
+        for u in users:
+            self.ledger.deposit(u, amount=10_000.0 + self.rng.random() * 2_000.0, note="demo seed")
+        mid = self.ledger.create_market(
+            MarketConfig(
+                key=f"DEMO-{stable_id(self.seed, ts)[:10]}",
+                label="Neon Macro: CPI surprise vs consensus (demo)",
+                outcomes=3,
+                close_ts=ts + 260,
+                settle_deadline_ts=ts + 900,
