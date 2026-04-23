@@ -1018,3 +1018,54 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     server: APIServer
 
     def _send(self, code: int, body: dict[str, t.Any]):
+        raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("content-type", "application/json; charset=utf-8")
+        self.send_header("content-length", str(len(raw)))
+        self.send_header("cache-control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _read_json(self) -> dict[str, t.Any]:
+        n = int(self.headers.get("content-length") or "0")
+        if n <= 0:
+            return {}
+        raw = self.rfile.read(n)
+        try:
+            return t.cast(dict[str, t.Any], json.loads(raw.decode("utf-8")))
+        except Exception:
+            raise ValueError("bad json")
+
+    def log_message(self, fmt: str, *args):
+        LOG.info("http %s - %s", self.address_string(), fmt % args)
+
+    def do_GET(self):
+        try:
+            self._route("GET")
+        except Exception as e:
+            LOG.exception("GET failed")
+            self._send(500, {"ok": False, "error": str(e), "trace": traceback.format_exc()})
+
+    def do_POST(self):
+        try:
+            self._route("POST")
+        except Exception as e:
+            LOG.exception("POST failed")
+            self._send(500, {"ok": False, "error": str(e), "trace": traceback.format_exc()})
+
+    def _route(self, method: str):
+        app = self.server.app
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        qs = urllib.parse.parse_qs(parsed.query)
+
+        if path == "":
+            path = "/"
+
+        if method == "GET" and path == "/":
+            self._send(200, {"ok": True, "app": APP_NAME, "version": APP_VERSION, "stats": app.ledger.stats()})
+            return
+
+        if method == "GET" and path == "/markets":
+            self._send(200, {"ok": True, "markets": app.ledger.list_markets()})
+            return
