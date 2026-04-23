@@ -763,3 +763,54 @@ class LedgerService:
             if not r:
                 raise ValueError("order not found")
             if r["maker"] == taker:
+                raise ValueError("self-take not allowed")
+            mrow, cfg = self._market_cfg_row(tx, int(r["market_id"]))
+            if mrow["status"] != MarketStatus.OPEN.value:
+                raise ValueError("market not open")
+            if now_ts() >= cfg.close_ts:
+                raise ValueError("market closed")
+            if int(r["expiry_ts"]) <= now_ts():
+                tx.execute("UPDATE orders SET status=? WHERE order_id=?", (OrderStatus.EXPIRED.value, order_id))
+                raise ValueError("order expired")
+            remaining = float(r["remaining"])
+            if remaining <= 0:
+                raise ValueError("no liquidity")
+            fill = min(stake, remaining)
+            if fill < cfg.min_stake:
+                raise ValueError("fill too small")
+            if fill > cfg.max_stake:
+                raise ValueError("fill too large")
+            side = Side(r["side"])
+            maker_side = side
+            taker_side = Side.LAY if maker_side == Side.BACK else Side.BACK
+            price_e4 = int(r["price_e4"])
+            lock = self._lock_for(taker_side, price_e4, fill)
+            self._apply_balance(tx, taker, da=-lock, dl=lock, dp=0.0)
+            self._post_ledger(tx, taker, "LOCK", order_id, da=-lock, dl=lock, dp=0.0, note="take lock")
+            # Risk accounting
+            notional = self.risk.notional(price_e4, fill)
+            self.risk.add_notional(int(r["market_id"]), maker=r["maker"], taker=taker, notional=notional)
+            # Update order remaining
+            nrem = remaining - fill
+            nst = OrderStatus.PARTIAL.value if nrem > 0 else OrderStatus.FILLED.value
+            tx.execute("UPDATE orders SET remaining=?, status=? WHERE order_id=?", (nrem, nst, order_id))
+            mid = ulidish()
+            created = now_ts()
+            tx.execute(
+                """
+                INSERT INTO matches(match_id,market_id,maker,taker,maker_side,outcome,price_e4,stake,status,created_ts)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    mid,
+                    int(r["market_id"]),
+                    r["maker"],
+                    taker,
+                    maker_side.value,
+                    int(r["outcome"]),
+                    price_e4,
+                    fill,
+                    MatchStatus.OPEN.value,
+                    created,
+                ),
+            )
