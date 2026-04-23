@@ -610,3 +610,54 @@ class LedgerService:
     def post_order(
         self,
         market_id: int,
+        maker: str,
+        side: Side,
+        outcome: int,
+        price_e4: int,
+        size: float,
+        expiry_ts: int,
+    ) -> Order:
+        maker = parse_user(maker)
+        price_e4 = parse_price_e4(price_e4)
+        size = float(clamp_float("size", size, 0.0000001, 1e18))
+        expiry_ts = parse_ts(expiry_ts)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, maker)
+            mrow, cfg = self._market_cfg_row(tx, market_id)
+            if mrow["status"] != MarketStatus.OPEN.value:
+                raise ValueError("market not open")
+            if now_ts() >= cfg.close_ts:
+                raise ValueError("market closed")
+            outcome = parse_outcome(outcome, cfg.outcomes)
+            if expiry_ts <= now_ts():
+                raise ValueError("order expired")
+            if size < cfg.min_stake or size > cfg.max_stake:
+                raise ValueError("size out of bounds")
+            live = int(
+                tx.execute(
+                    "SELECT COUNT(1) AS n FROM orders WHERE market_id=? AND maker=? AND status IN (?,?,?)",
+                    (int(market_id), maker, OrderStatus.LIVE.value, OrderStatus.PARTIAL.value, OrderStatus.EXPIRED.value),
+                ).fetchone()["n"]
+            )
+            if live >= cfg.max_orders_per_user:
+                raise ValueError("too many open orders")
+            lock = self._lock_for(side, price_e4, size)
+            self._apply_balance(tx, maker, da=-lock, dl=lock, dp=0.0)
+            oid = ulidish()
+            created = now_ts()
+            tx.execute(
+                """
+                INSERT INTO orders(order_id,market_id,maker,side,outcome,price_e4,size,remaining,expiry_ts,status,created_ts)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    oid,
+                    int(market_id),
+                    maker,
+                    side.value,
+                    int(outcome),
+                    int(price_e4),
+                    float(size),
+                    float(size),
+                    int(expiry_ts),
