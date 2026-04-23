@@ -865,3 +865,54 @@ class LedgerService:
                     "status": r["status"],
                     "created_ts": int(r["created_ts"]),
                 }
+            )
+        return out
+
+    def settle_market(self, market_id: int, outcome: int) -> dict[str, t.Any]:
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            mrow, cfg = self._market_cfg_row(tx, market_id)
+            st = MarketStatus(mrow["status"])
+            if st in (MarketStatus.SETTLED, MarketStatus.VOIDED):
+                raise ValueError("market already final")
+            if now_ts() < cfg.close_ts:
+                raise ValueError("market not closed")
+            outcome = parse_outcome(outcome, cfg.outcomes)
+            tx.execute(
+                "UPDATE markets SET status=?, settled_outcome=? WHERE market_id=?",
+                (MarketStatus.SETTLED.value, int(outcome), int(market_id)),
+            )
+        return self.get_market(market_id)
+
+    def void_market(self, market_id: int) -> dict[str, t.Any]:
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            mrow, _cfg = self._market_cfg_row(tx, market_id)
+            st = MarketStatus(mrow["status"])
+            if st in (MarketStatus.SETTLED, MarketStatus.VOIDED):
+                raise ValueError("market already final")
+            tx.execute("UPDATE markets SET status=?, settled_outcome=NULL WHERE market_id=?", (MarketStatus.VOIDED.value, int(market_id)))
+        return self.get_market(market_id)
+
+    def claim(self, match_id: str, claimant: str) -> dict[str, t.Any]:
+        claimant = parse_user(claimant)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, claimant)
+            m = tx.execute("SELECT * FROM matches WHERE match_id=?", (match_id,)).fetchone()
+            if not m:
+                raise ValueError("match not found")
+            market_id = int(m["market_id"])
+            mrow, cfg = self._market_cfg_row(tx, market_id)
+            st = MarketStatus(mrow["status"])
+            if st not in (MarketStatus.SETTLED, MarketStatus.VOIDED):
+                raise ValueError("market not settled")
+            maker = m["maker"]
+            taker = m["taker"]
+            if claimant not in (maker, taker):
+                raise ValueError("not participant")
+            status = MatchStatus(m["status"])
+            if claimant == maker and status in (MatchStatus.CLAIMED_MAKER, MatchStatus.CLAIMED_BOTH):
+                raise ValueError("already claimed")
+            if claimant == taker and status in (MatchStatus.CLAIMED_TAKER, MatchStatus.CLAIMED_BOTH):
+                raise ValueError("already claimed")
