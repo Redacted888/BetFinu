@@ -508,3 +508,54 @@ class LedgerService:
         max_orders = clamp_int("max_orders_per_user", cfg.max_orders_per_user, 1, 10_000)
         fee_bps = clamp_int("fee_bps", cfg.fee.fee_bps, 0, self.risk.caps.max_fee_bps)
         rebate_bps = clamp_int("maker_rebate_bps", cfg.fee.maker_rebate_bps, 0, self.risk.caps.max_rebate_bps)
+        if rebate_bps > fee_bps:
+            raise ValueError("maker_rebate_bps must be <= fee_bps")
+        with self.db.tx() as tx:
+            tx.execute(
+                """
+                INSERT INTO markets(
+                  key,label,outcomes,close_ts,settle_deadline_ts,
+                  min_stake,max_stake,max_orders_per_user,allow_unmatched,
+                  fee_bps,maker_rebate_bps,status,settled_outcome,created_ts
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    key,
+                    label,
+                    outcomes,
+                    close_ts,
+                    settle_deadline_ts,
+                    min_stake,
+                    max_stake,
+                    max_orders,
+                    1 if cfg.allow_unmatched else 0,
+                    fee_bps,
+                    rebate_bps,
+                    MarketStatus.OPEN.value,
+                    None,
+                    now_ts(),
+                ),
+            )
+            mid = int(tx.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+            return mid
+
+    def list_markets(self) -> list[dict[str, t.Any]]:
+        c = self.db.conn()
+        rows = c.execute(
+            "SELECT market_id,key,label,outcomes,close_ts,settle_deadline_ts,min_stake,max_stake,fee_bps,maker_rebate_bps,status,settled_outcome FROM markets ORDER BY market_id DESC"
+        ).fetchall()
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "market_id": int(r["market_id"]),
+                    "key": r["key"],
+                    "label": r["label"],
+                    "outcomes": int(r["outcomes"]),
+                    "close_ts": int(r["close_ts"]),
+                    "settle_deadline_ts": int(r["settle_deadline_ts"]),
+                    "min_stake": float(r["min_stake"]),
+                    "max_stake": float(r["max_stake"]),
+                    "fee_bps": int(r["fee_bps"]),
+                    "maker_rebate_bps": int(r["maker_rebate_bps"]),
+                    "status": r["status"],
