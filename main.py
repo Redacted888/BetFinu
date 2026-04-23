@@ -916,3 +916,54 @@ class LedgerService:
                 raise ValueError("already claimed")
             if claimant == taker and status in (MatchStatus.CLAIMED_TAKER, MatchStatus.CLAIMED_BOTH):
                 raise ValueError("already claimed")
+            maker_side = Side(m["maker_side"])
+            taker_side = Side.LAY if maker_side == Side.BACK else Side.BACK
+            claimant_side = maker_side if claimant == maker else taker_side
+            price_e4 = int(m["price_e4"])
+            stake = float(m["stake"])
+            outcome = int(m["outcome"])
+            if st == MarketStatus.VOIDED:
+                gross = self._lock_for(claimant_side, price_e4, stake)
+                fee = 0.0
+                net = gross
+            else:
+                settled_outcome = int(mrow["settled_outcome"])
+                wins = (settled_outcome == outcome) if claimant_side == Side.BACK else (settled_outcome != outcome)
+                if wins:
+                    if claimant_side == Side.BACK:
+                        gross = stake * odds_to_float(price_e4)
+                    else:
+                        gross = stake
+                else:
+                    gross = 0.0
+                fee = bps_fee(gross, cfg.fee.fee_bps)
+                rebate = bps_fee(fee, cfg.fee.maker_rebate_bps) if claimant == maker else 0.0
+                net = gross - fee + rebate
+                fee = fee - rebate
+            # Move locked -> pending payout for claimant.
+            lock = self._lock_for(claimant_side, price_e4, stake)
+            self._apply_balance(tx, claimant, da=0.0, dl=-lock, dp=net)
+            self._post_ledger(tx, claimant, "CLAIM", match_id, da=0.0, dl=-lock, dp=net, note="claim payout")
+            # Fee goes to house user.
+            house = "HOUSE"
+            self._ensure_user(tx, house)
+            if fee > 0:
+                self._apply_balance(tx, house, da=0.0, dl=0.0, dp=fee)
+                self._post_ledger(tx, house, "FEE", match_id, da=0.0, dl=0.0, dp=fee, note="house fee")
+            # Update match status
+            nstatus = status
+            if claimant == maker:
+                nstatus = MatchStatus.CLAIMED_MAKER if status == MatchStatus.OPEN else MatchStatus.CLAIMED_BOTH
+            else:
+                nstatus = MatchStatus.CLAIMED_TAKER if status == MatchStatus.OPEN else MatchStatus.CLAIMED_BOTH
+            tx.execute("UPDATE matches SET status=? WHERE match_id=?", (nstatus.value, match_id))
+            return {"net": net, "fee": fee, "gross": gross, "match": dict(self.get_match(match_id).__dict__)}
+
+    @staticmethod
+    def _lock_for(side: Side, price_e4: int, stake: float) -> float:
+        if side == Side.BACK:
+            return float(stake)
+        odds = odds_to_float(price_e4)
+        if odds <= 1.0:
+            return float(stake)
+        liability = stake * (odds - 1.0)
