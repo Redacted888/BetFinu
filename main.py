@@ -457,3 +457,54 @@ class LedgerService:
             "UPDATE balances SET available=?, locked=?, pending_payout=?, updated_ts=? WHERE user=?",
             (na, nl, np, now_ts(), user),
         )
+        return Balance(user=user, available=na, locked=nl, pending_payout=np)
+
+    def deposit(self, user: str, amount: float, note: str = "deposit") -> Balance:
+        user = parse_user(user)
+        amount = clamp_float("amount", amount, 0.0000001, 1e18)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, user)
+            b = self._apply_balance(tx, user, da=amount, dl=0.0, dp=0.0)
+            self._post_ledger(tx, user, "DEPOSIT", None, amount, 0.0, 0.0, note)
+            return b
+
+    def queue_withdraw(self, user: str, amount: float, note: str = "queue_withdraw") -> Balance:
+        user = parse_user(user)
+        amount = clamp_float("amount", amount, 0.0000001, 1e18)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, user)
+            b = self._apply_balance(tx, user, da=-amount, dl=0.0, dp=amount)
+            self._post_ledger(tx, user, "QUEUE_WITHDRAW", None, -amount, 0.0, amount, note)
+            return b
+
+    def withdraw(self, user: str, note: str = "withdraw") -> Balance:
+        user = parse_user(user)
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, user)
+            row = tx.execute("SELECT pending_payout FROM balances WHERE user=?", (user,)).fetchone()
+            amt = float(row["pending_payout"]) if row else 0.0
+            if amt <= 0:
+                raise ValueError("nothing to withdraw")
+            b = self._apply_balance(tx, user, da=0.0, dl=0.0, dp=-amt)
+            self._post_ledger(tx, user, "WITHDRAW", None, 0.0, 0.0, -amt, note)
+            return b
+
+    def create_market(self, cfg: MarketConfig) -> int:
+        c = self.db.conn()
+        key = parse_market_key(cfg.key)
+        label = parse_label(cfg.label)
+        outcomes = clamp_int("outcomes", cfg.outcomes, 2, 8)
+        close_ts = parse_ts(cfg.close_ts)
+        settle_deadline_ts = parse_ts(cfg.settle_deadline_ts)
+        if close_ts <= now_ts():
+            raise ValueError("close_ts must be in the future")
+        if settle_deadline_ts <= close_ts:
+            raise ValueError("settle_deadline_ts must be > close_ts")
+        min_stake = clamp_float("min_stake", cfg.min_stake, 0.0000001, 1e18)
+        max_stake = clamp_float("max_stake", cfg.max_stake, min_stake, 1e18)
+        max_orders = clamp_int("max_orders_per_user", cfg.max_orders_per_user, 1, 10_000)
+        fee_bps = clamp_int("fee_bps", cfg.fee.fee_bps, 0, self.risk.caps.max_fee_bps)
+        rebate_bps = clamp_int("maker_rebate_bps", cfg.fee.maker_rebate_bps, 0, self.risk.caps.max_rebate_bps)
