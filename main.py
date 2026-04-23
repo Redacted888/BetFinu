@@ -1375,3 +1375,54 @@ def cmd_balance(args) -> None:
 
 
 def cmd_orders(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    out = app.ledger.list_orders(market_id=int(args.market_id) if args.market_id else None, user=args.user)
+    print(json_dumps({"ok": True, "orders": out}))
+
+
+def cmd_matches(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    out = app.ledger.list_matches(market_id=int(args.market_id) if args.market_id else None, user=args.user)
+    print(json_dumps({"ok": True, "matches": out}))
+
+
+def cmd_ledger_tail(args) -> None:
+    app = BetFinuApp(db_path=args.db, seed=args.seed)
+    out = app.ledger.tail_ledger(args.user, limit=int(args.limit))
+    print(json_dumps({"ok": True, "rows": out}))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="BetFinu", description="BetFinu — AI finance terminal style betting desk")
+    p.add_argument("--db", default=os.path.join(os.getcwd(), "betfinu.sqlite3"), help="SQLite DB path")
+    p.add_argument("--seed", type=int, default=None, help="Deterministic seed for demo/sim")
+    p.add_argument("-v", "--verbose", action="count", default=0, help="Increase logging verbosity")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("init", help="Initialize database")
+    s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser("demo", help="Seed a demo desk state")
+    s.set_defaults(fn=cmd_demo)
+
+    s = sub.add_parser("api", help="Run HTTP JSON API")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8787)
+    s.add_argument("--demo", action="store_true", help="Seed demo before serving")
+    s.set_defaults(fn=cmd_api)
+
+    s = sub.add_parser("deposit", help="Credit a user balance (local)")
+    s.add_argument("user")
+    s.add_argument("amount", type=float)
+    s.set_defaults(fn=cmd_deposit)
+
+    s = sub.add_parser("withdraw-queue", help="Move available -> pending payout")
+    s.add_argument("user")
+    s.add_argument("amount", type=float)
+    s.set_defaults(fn=cmd_withdraw_queue)
+
+    s = sub.add_parser("withdraw", help="Finalize withdrawal (pending -> 0)")
+    s.add_argument("user")
+    s.set_defaults(fn=cmd_withdraw)
+
+    s = sub.add_parser("market-create", help="Create a market")
