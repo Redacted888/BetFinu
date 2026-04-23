@@ -712,3 +712,54 @@ class LedgerService:
             side=Side(r["side"]),
             outcome=int(r["outcome"]),
             price_e4=int(r["price_e4"]),
+            size=float(r["size"]),
+            remaining=float(r["remaining"]),
+            expiry_ts=int(r["expiry_ts"]),
+            status=OrderStatus(r["status"]),
+            created_ts=int(r["created_ts"]),
+        )
+
+    def list_orders(self, market_id: int | None = None, user: str | None = None) -> list[dict[str, t.Any]]:
+        c = self.db.conn()
+        q = "SELECT * FROM orders"
+        args: list[t.Any] = []
+        cond: list[str] = []
+        if market_id is not None:
+            cond.append("market_id=?")
+            args.append(int(market_id))
+        if user is not None:
+            cond.append("maker=?")
+            args.append(parse_user(user))
+        if cond:
+            q += " WHERE " + " AND ".join(cond)
+        q += " ORDER BY created_ts DESC LIMIT 500"
+        rows = c.execute(q, args).fetchall()
+        out: list[dict[str, t.Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "order_id": r["order_id"],
+                    "market_id": int(r["market_id"]),
+                    "maker": r["maker"],
+                    "side": r["side"],
+                    "outcome": int(r["outcome"]),
+                    "price_e4": int(r["price_e4"]),
+                    "size": float(r["size"]),
+                    "remaining": float(r["remaining"]),
+                    "expiry_ts": int(r["expiry_ts"]),
+                    "status": r["status"],
+                    "created_ts": int(r["created_ts"]),
+                }
+            )
+        return out
+
+    def take_order(self, order_id: str, taker: str, stake: float) -> Match:
+        taker = parse_user(taker)
+        stake = float(clamp_float("stake", stake, 0.0000001, 1e18))
+        c = self.db.conn()
+        with self.db.tx() as tx:
+            self._ensure_user(tx, taker)
+            r = tx.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
+            if not r:
+                raise ValueError("order not found")
+            if r["maker"] == taker:
